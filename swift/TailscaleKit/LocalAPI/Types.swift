@@ -228,6 +228,8 @@ public struct IpnLocal: Sendable {
 
 public struct IpnState: Sendable {
     public struct PeerStatus: Codable, Equatable, Sendable {
+        /// The user ID assigned to this peer.
+        public var UserID: Tailcfg.UserID
         public var ID: Tailcfg.StableNodeID
         public var HostName: String
         public var DNSName: String

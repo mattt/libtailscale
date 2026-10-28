@@ -41,8 +41,24 @@ var servers struct {
 
 type server struct {
 	s       *tsnet.Server
-	lastErr string
 	started bool
+
+	// mu guards lastErr. Calls such as TsnetWhoIs can run concurrently
+	// on the same server from different C threads.
+	mu      sync.Mutex
+	lastErr string
+}
+
+func (s *server) setLastErr(msg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastErr = msg
+}
+
+func (s *server) getLastErr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastErr
 }
 
 func getServer(sd C.int) *server {
@@ -87,10 +103,10 @@ type conn struct {
 
 func (s *server) recErr(err error) C.int {
 	if err == nil {
-		s.lastErr = ""
+		s.setLastErr("")
 		return 0
 	}
-	s.lastErr = err.Error()
+	s.setLastErr(err.Error())
 	return -1
 }
 
@@ -213,7 +229,7 @@ func TsnetErrmsg(sd C.int, buf *C.char, buflen C.size_t) C.int {
 		out[0] = '\x00'
 		return C.EBADF
 	}
-	n := copy(out, s.lastErr)
+	n := copy(out, s.getLastErr())
 	if n >= len(out) {
 		out[len(out)-1] = '\x00' // always NUL-terminate
 		return C.ERANGE
@@ -488,7 +504,7 @@ func TsnetGetRemoteAddr(listener C.int, conn C.int, buf *C.char, buflen C.size_t
 	ip, ok := l.m[conn]
 	if !ok {
 		// set errmsg too: EBADF with an empty message is not debuggable
-		l.s.lastErr = fmt.Sprintf("libtailscale: getremoteaddr: no remote address recorded for conn %d on listener %d", conn, listener)
+		l.s.setLastErr(fmt.Sprintf("libtailscale: getremoteaddr: no remote address recorded for conn %d on listener %d", conn, listener))
 		out[0] = '\x00'
 		return C.EBADF
 	}
@@ -648,6 +664,36 @@ func TsnetLoopback(sd C.int, addrOut *C.char, addrLen C.size_t, proxyOut *C.char
 	copy(out, localAPICred)
 	out[32] = '\x00'
 
+	return 0
+}
+
+//export TsnetWhoIs
+func TsnetWhoIs(sd C.int, addr *C.char, jsonOut **C.char) C.int {
+	if jsonOut == nil {
+		panic("whois passed nil json_out")
+	}
+	*jsonOut = nil
+	s := getServer(sd)
+	if s == nil {
+		return C.EBADF
+	}
+	// Like TsnetStatusJSON, use tsnet's in-memory LocalAPI rather than
+	// starting Loopback()'s TCP server.
+	lc, err := s.s.LocalClient()
+	if err != nil {
+		return s.recErr(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	who, err := lc.WhoIs(ctx, C.GoString(addr))
+	if err != nil {
+		return s.recErr(err)
+	}
+	b, err := json.Marshal(who)
+	if err != nil {
+		return s.recErr(err)
+	}
+	*jsonOut = C.CString(string(b))
 	return 0
 }
 

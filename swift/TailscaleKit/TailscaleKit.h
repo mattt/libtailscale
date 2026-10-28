@@ -182,6 +182,18 @@ extern int tailscale_accept(tailscale_listener listener, tailscale_conn* conn_ou
 // Returns zero on success or -1 on error, call tailscale_errmsg for details.
 extern int tailscale_loopback(tailscale sd, char* addr_out, size_t addrlen, char* proxy_cred_out, char* local_api_cred_out);
 
+// tailscale_whois identifies the peer at addr (an IP or IP:port) through
+// tsnet's in-memory LocalAPI, without starting a loopback TCP server.
+// It writes the JSON encoding of apitype.WhoIsResponse to *json_out.
+// Node.StableID, Node.User, and Node.Tags identify the peer.
+// The caller owns the NUL-terminated string and must release it with free().
+//
+// Returns:
+// 	0     - success, *json_out is set
+// 	EBADF - sd is not a valid tailscale
+// 	-1    - call tailscale_errmsg for details (*json_out is NULL)
+extern int tailscale_whois(tailscale sd, const char* addr, char** json_out);
+
 // tailscale_status_json writes the backend status (the JSON encoding of
 // ipnstate.Status, the same struct LocalAPI's /localapi/v0/status returns)
 // to *json_out as a NUL-terminated, malloc'd string. The caller owns the

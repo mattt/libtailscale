@@ -164,6 +164,50 @@ public actor TailscaleNode {
         return Data(bytes: out, count: strlen(out))
     }
 
+    /// The identity of a peer returned by the in-memory LocalAPI.
+    public struct WhoIsResponse: Decodable, Sendable {
+        /// The peer node's identity and assigned tags.
+        public let Node: Peer
+
+        /// The node fields used to identify and authorize a peer.
+        public struct Peer: Decodable, Sendable {
+            /// The stable node ID.
+            public let StableID: Tailcfg.StableNodeID
+            /// The user ID assigned to the node.
+            public let User: Tailcfg.UserID
+            /// The tags assigned to the node, if any.
+            public let Tags: [String]?
+        }
+    }
+
+    /// Identifies a peer by IP or IP:port without starting a loopback server.
+    ///
+    /// The lookup goes through tsnet's in-memory LocalAPI and can take up to
+    /// 10 seconds.  It runs off the actor, so other calls on this node are not
+    /// blocked while it is in flight.
+    ///
+    /// @See tailscale_whois in Tailscale.h
+    ///
+    /// - Throws: A TailscaleError or a JSON decoding error on failure.
+    public func whois(_ address: String) async throws -> WhoIsResponse {
+        guard let tailscale else {
+            throw TailscaleError.badInterfaceHandle
+        }
+
+        // tailscale_whois blocks on the LocalAPI for up to its timeout.  Run it
+        // in a detached task so we don't block the actor.
+        let data = try await Task.detached {
+            var out: UnsafeMutablePointer<CChar>?
+            let res = tailscale_whois(tailscale, address, &out)
+            guard res == 0, let out else {
+                throw TailscaleError.fromPosixErrCode(res, tailscale.getErrorMessage())
+            }
+            defer { free(out) }
+            return Data(bytes: out, count: strlen(out))
+        }.value
+        return try JSONDecoder().decode(WhoIsResponse.self, from: data)
+    }
+
     /// Tears down the Tailscale server.
     ///
     /// @See tailscale_down in Tailscale.h

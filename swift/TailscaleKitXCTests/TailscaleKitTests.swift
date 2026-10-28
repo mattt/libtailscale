@@ -127,6 +127,121 @@ final class TailscaleKitTests: XCTestCase {
         }
     }
 
+    /// A tailnet port for the tests that dial with the C API.
+    let testPort = 47420
+
+    /// Brings up two nodes, dials the first from the second with the C API,
+    /// and returns the accepted connection.  The caller closes `dialed`.
+    func connectedPair() async throws -> (listenerNode: TailscaleNode,
+                                          dialerNode: TailscaleNode,
+                                          accepted: IncomingConnection,
+                                          dialed: TailscaleConnection) {
+        let logger = BlackholeLogger()
+
+        let ts1 = try TailscaleNode(config: mockConfig(), logger: logger)
+        try await ts1.up()
+        let ts2 = try TailscaleNode(config: mockConfig(), logger: logger)
+        try await ts2.up()
+
+        let ts1Handle = await ts1.tailscale
+        let ts2Handle = await ts2.tailscale
+        let listenerIP = try await ts1.addrs().ip4
+        guard let ts1Handle, let ts2Handle, let listenerIP else {
+            throw TailscaleError.badInterfaceHandle
+        }
+
+        let listener = try await Listener(tailscale: ts1Handle,
+                                          proto: .tcp,
+                                          address: ":\(testPort)",
+                                          logger: logger)
+        async let accepted = listener.accept(timeout: 10)
+
+        var conn: TailscaleConnection = 0
+        let res = tailscale_dial(ts2Handle, "tcp", "\(listenerIP):\(testPort)", &conn)
+        guard res == 0 else {
+            throw TailscaleError.fromPosixErrCode(res, ts2Handle.getErrorMessage())
+        }
+
+        let inbound = try await accepted
+        await listener.close()
+        return (ts1, ts2, inbound, conn)
+    }
+
+    /// Tests that whois on an accepted connection identifies the dialing node.
+    func testWhoIs() async throws {
+        let (ts1, ts2, inbound, conn) = try await connectedPair()
+        defer { Darwin.close(conn) }
+
+        let status = try JSONDecoder().decode(IpnState.Status.self,
+                                              from: try await ts2.statusJSON())
+        let dialer = try XCTUnwrap(status.SelfStatus)
+
+        let inboundIP = await inbound.remoteAddress
+        let remoteAddress = try XCTUnwrap(inboundIP)
+        let dialerIP = try await ts2.addrs().ip4
+        XCTAssertEqual(remoteAddress, dialerIP)
+
+        let who = try await ts1.whois(remoteAddress)
+        XCTAssertEqual(who.Node.StableID, dialer.ID)
+        XCTAssertEqual(who.Node.User, dialer.UserID)
+
+        do {
+            _ = try await ts1.whois("192.0.2.1")
+            XCTFail("whois of an unknown address succeeded")
+        } catch TailscaleError.internalError(let details) {
+            XCTAssertNotNil(details)
+        }
+
+        await inbound.close()
+        try await ts1.close()
+        try await ts2.close()
+    }
+
+    /// Tests that IncomingConnection.send replies to the dialing node.
+    func testIncomingSend() async throws {
+        let (ts1, ts2, inbound, conn) = try await connectedPair()
+        defer { Darwin.close(conn) }
+
+        let ping = Data("ping".utf8)
+        let written = ping.withUnsafeBytes { bytes in
+            Darwin.write(conn, bytes.baseAddress, bytes.count)
+        }
+        XCTAssertEqual(written, ping.count)
+        let gotPing = try await inbound.receive(timeout: 5000)
+        XCTAssertEqual(gotPing, ping)
+
+        let pong = Data("pong".utf8)
+        try await inbound.send(pong)
+
+        var p = pollfd(fd: conn, events: Int16(POLLIN), revents: 0)
+        XCTAssertEqual(poll(&p, 1, 5000), 1)
+        var buf = [UInt8](repeating: 0, count: 16)
+        let n = Darwin.read(conn, &buf, buf.count)
+        XCTAssertEqual(n, pong.count)
+        XCTAssertEqual(Data(buf.prefix(max(n, 0))), pong)
+
+        await inbound.close()
+        try await ts1.close()
+        try await ts2.close()
+    }
+
+    /// Tests that LocalAPIClient.logout logs the node out.
+    func testLogout() async throws {
+        let logger = BlackholeLogger()
+        let ts1 = try TailscaleNode(config: mockConfig(), logger: logger)
+        try await ts1.up()
+
+        let api = LocalAPIClient(localNode: ts1, logger: logger)
+        let before = try await api.backendStatus()
+        XCTAssertEqual(before.BackendState, "Running")
+
+        try await api.logout()
+        let after = try await api.backendStatus()
+        XCTAssertEqual(after.BackendState, "NeedsLogin")
+
+        try await ts1.close()
+    }
+
     /// The hostCount here is load bearing.  Each mock host must have a unique
     /// path and hostname.
     var hostCount = 0

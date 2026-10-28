@@ -51,6 +51,22 @@ public actor IncomingConnection {
         _state = .closed
     }
 
+    /// Sends data to the peer.
+    ///
+    /// - Throws: TailscaleError if the connection is closed or the write is incomplete.
+    public func send(_ data: Data) throws {
+        guard _state == .connected else {
+            throw TailscaleError.connectionClosed
+        }
+
+        let bytesWritten = data.withUnsafeBytes { bytes in
+            Darwin.write(conn, bytes.baseAddress, bytes.count)
+        }
+        if bytesWritten != data.count {
+            throw TailscaleError.shortWrite
+        }
+    }
+
     /// Returns up to size bytes from the connection.  Blocks until
     /// data is available
     public func receive(maximumLength: Int = 4096, timeout: Int32) async throws -> Data {
