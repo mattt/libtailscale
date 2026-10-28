@@ -24,3 +24,6 @@ libtailscale.bundle
 /sourcepkg/libtailscale.tar*
 
 /vendor/
+
+# SwiftPM
+/.build/
