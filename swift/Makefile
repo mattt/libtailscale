@@ -59,6 +59,10 @@ ios-fat: ios-sim ios ## Builds TailscaleKit.xcframework to swift/build/Build/Pro
 		-framework ./build/Build/Products/Release-iphonesimulator/TailscaleKit.framework \
 		-output ./build/Build/Products/Release-iphonefat/TailscaleKit.xcframework
 
+.PHONY: imcp
+imcp:  ## Builds the iMCP TailscaleKit.xcframework zip to swift/build/imcp (see IMCP.md)
+	./script/build-imcp.sh
+
 .PHONY: test
 test: ## Run tests (macOS)
 	@echo 
