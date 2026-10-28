@@ -104,3 +104,8 @@ require (
 	gvisor.dev/gvisor v0.0.0-20260915211658-a6f909f08a72 // indirect
 	honnef.co/go/tools v0.8.1 // indirect
 )
+
+// The iMCP build sets ts_omit_acme, but tsnet at v1.104.1 does not compile
+// with that tag. This fork commit is v1.104.1 plus client/local/cert_omit.go
+// from tailscale/tailscale#22031. Remove it once a release includes that file.
+replace tailscale.com => github.com/mattt/tailscale v0.0.0-20261028231136-09eb6e79b96c
