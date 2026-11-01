@@ -227,6 +227,11 @@ extern int tailscale_status_json(tailscale sd, char** json_out);
 //
 // After returning, buf is always NUL-terminated.
 //
+// Each tailscale has one last-error message. If calls on the same sd fail
+// at the same time on different threads, such as concurrent
+// tailscale_whois calls, each caller can read the message of another
+// call's failure, or an empty message if another call succeeded in between.
+//
 // Returns:
 //     0      - success
 //     EBADF  - sd is not a valid tailscale

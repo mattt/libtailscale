@@ -186,6 +186,10 @@ public actor TailscaleNode {
     /// 10 seconds.  It runs off the actor, so other calls on this node are not
     /// blocked while it is in flight.
     ///
+    /// The node has one last-error message, so when lookups fail at the same
+    /// time, the details of a thrown error can describe another lookup's
+    /// failure.
+    ///
     /// @See tailscale_whois in Tailscale.h
     ///
     /// - Throws: A TailscaleError or a JSON decoding error on failure.

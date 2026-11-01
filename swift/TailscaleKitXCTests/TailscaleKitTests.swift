@@ -196,12 +196,73 @@ final class TailscaleKitTests: XCTestCase {
             _ = try await ts1.whois("192.0.2.1")
             XCTFail("whois of an unknown address succeeded")
         } catch TailscaleError.internalError(let details) {
-            XCTAssertNotNil(details)
+            XCTAssertFalse(try XCTUnwrap(details).isEmpty)
         }
 
         await inbound.close()
         try await ts1.close()
         try await ts2.close()
+    }
+
+    /// Tests that whois accepts an IP:port address.
+    func testWhoIsWithPort() async throws {
+        let (ts1, ts2, inbound, conn) = try await connectedPair()
+        defer { Darwin.close(conn) }
+
+        let status = try JSONDecoder().decode(IpnState.Status.self,
+                                              from: try await ts2.statusJSON())
+        let dialer = try XCTUnwrap(status.SelfStatus)
+        let dialerAddrs = try await ts2.addrs()
+        let dialerIP = try XCTUnwrap(dialerAddrs.ip4)
+
+        let who = try await ts1.whois("\(dialerIP):\(testPort + 1)")
+        XCTAssertEqual(who.Node.StableID, dialer.ID)
+        XCTAssertEqual(who.Node.User, dialer.UserID)
+
+        await inbound.close()
+        try await ts1.close()
+        try await ts2.close()
+    }
+
+    /// Tests that concurrent whois calls on one node all succeed.
+    func testConcurrentWhoIs() async throws {
+        let (ts1, ts2, inbound, conn) = try await connectedPair()
+        defer { Darwin.close(conn) }
+
+        let status = try JSONDecoder().decode(IpnState.Status.self,
+                                              from: try await ts2.statusJSON())
+        let dialerID = try XCTUnwrap(status.SelfStatus).ID
+        let dialerAddrs = try await ts2.addrs()
+        let dialerIP = try XCTUnwrap(dialerAddrs.ip4)
+
+        let ids = try await withThrowingTaskGroup(of: Tailcfg.StableNodeID.self) { group in
+            for i in 0..<16 {
+                let address = i.isMultiple(of: 2) ? dialerIP : "\(dialerIP):\(testPort + i)"
+                group.addTask { try await ts1.whois(address).Node.StableID }
+            }
+            return try await group.reduce(into: []) { $0.append($1) }
+        }
+        XCTAssertEqual(ids, Array(repeating: dialerID, count: 16))
+
+        await inbound.close()
+        try await ts1.close()
+        try await ts2.close()
+    }
+
+    /// Tests that whois on a closed node throws EBADF.
+    func testWhoIsAfterClose() async throws {
+        let ts1 = try TailscaleNode(config: mockConfig(), logger: BlackholeLogger())
+        try await ts1.up()
+        let addrs = try await ts1.addrs()
+        let ip = try XCTUnwrap(addrs.ip4)
+        try await ts1.close()
+
+        do {
+            _ = try await ts1.whois(ip)
+            XCTFail("whois on a closed node succeeded")
+        } catch TailscaleError.posixError(let error, _) {
+            XCTAssertEqual(error.code, .EBADF)
+        }
     }
 
     /// Tests that IncomingConnection.send replies to the dialing node.
