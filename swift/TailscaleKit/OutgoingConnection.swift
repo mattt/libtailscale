@@ -93,20 +93,77 @@ public actor OutgoingConnection {
         state = .closed
     }
 
-    /// Sends the given data to the connection
+    /// Sends all of the given data to the connection.
     ///
-    /// @throws TailscaleError on failure
-    public func send(_ data: Data) throws {
+    /// The call blocks the actor until the peer accepts every byte or the
+    /// timeout passes.  If it throws after it sent part of the data, the
+    /// peer has received only a prefix of `data`; close the connection.
+    ///
+    /// - Parameters:
+    ///   - data: The bytes to send.
+    ///   - timeout: The longest time to wait, in milliseconds, for the whole
+    ///     send.  A negative value waits indefinitely.
+    /// - Throws: `TailscaleError.connectionClosed` if the connection is not
+    ///   connected, `TailscaleError.posixError` with `ETIMEDOUT` if the
+    ///   timeout passes, or with `EPIPE` if the peer has gone away.
+    public func send(_ data: Data, timeout: Int32 = kDefaultSendTimeout) throws {
         guard state == .connected else {
             throw TailscaleError.connectionClosed
         }
 
-        let bytesWritten = data.withUnsafeBytes { bytes in
-            Darwin.write(conn, bytes.baseAddress, bytes.count)
-        }
+        try sendAll(data, to: conn, timeout: timeout)
+    }
+}
 
-        if bytesWritten != data.count {
-            throw TailscaleError.shortWrite
+/// The default `send(_:timeout:)` timeout, in milliseconds.
+public let kDefaultSendTimeout: Int32 = 10_000
+
+/// Writes all of `data` to `fd`, waiting at most `timeout` milliseconds in
+/// total for the socket to accept it.  A negative timeout waits indefinitely.
+///
+/// Before each write, `SO_SNDTIMEO` is set to the time that remains, so a peer
+/// that stops reading cannot block the caller beyond the timeout.  (On Darwin,
+/// `MSG_DONTWAIT` does not stop a large blocking `send` from waiting for
+/// buffer space.)  libtailscale sets `SO_NOSIGPIPE` on connection sockets, so
+/// a write after the peer closes fails with `EPIPE`.
+func sendAll(_ data: Data, to fd: TailscaleConnection, timeout: Int32) throws {
+    let start = DispatchTime.now().uptimeNanoseconds
+    let limit = timeout < 0 ? nil : UInt64(timeout) * 1_000_000
+
+    try data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+        var offset = 0
+        while offset < bytes.count {
+            // A zero SO_SNDTIMEO means no limit.
+            var tv = timeval(tv_sec: 0, tv_usec: 0)
+            if let limit {
+                let elapsed = DispatchTime.now().uptimeNanoseconds - start
+                guard elapsed < limit else {
+                    throw TailscaleError.posixError(POSIXError(.ETIMEDOUT))
+                }
+                let remaining = limit - elapsed
+                tv.tv_sec = Int(remaining / 1_000_000_000)
+                tv.tv_usec = Int32(remaining % 1_000_000_000 / 1_000)
+                if tv.tv_sec == 0 && tv.tv_usec == 0 {
+                    tv.tv_usec = 1
+                }
+            }
+            // Darwin rejects socket options with EINVAL after both directions
+            // of the socket shut down.  The write below then fails at once,
+            // so it needs no timeout.
+            if setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv,
+                          socklen_t(MemoryLayout<timeval>.size)) != 0, errno != EINVAL {
+                throw TailscaleError.fromPosixErrCode(errno)
+            }
+
+            let n = Darwin.write(fd, bytes.baseAddress! + offset, bytes.count - offset)
+            if n < 0 {
+                let err = errno
+                // EAGAIN means SO_SNDTIMEO passed; the deadline check above
+                // then throws ETIMEDOUT.
+                if err == EINTR || err == EAGAIN { continue }
+                throw TailscaleError.fromPosixErrCode(err)
+            }
+            offset += n
         }
     }
 }

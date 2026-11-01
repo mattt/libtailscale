@@ -232,6 +232,90 @@ final class TailscaleKitTests: XCTestCase {
         try await ts2.close()
     }
 
+    /// Tests that a send after the peer closes throws EPIPE.  Without
+    /// SO_NOSIGPIPE on the connection, the write raises SIGPIPE on this
+    /// non-Go thread and terminates the test process.
+    func testSendAfterPeerCloses() async throws {
+        let (ts1, ts2, inbound, conn) = try await connectedPair()
+        Darwin.close(conn)
+
+        // The Go side closes its end of the accepted socketpair only after a
+        // write toward the closed dialer fails, so keep sending until it does.
+        let deadline = Date().addingTimeInterval(10)
+        var sendError: Error?
+        while sendError == nil, Date() < deadline {
+            do {
+                try await inbound.send(Data("ping".utf8), timeout: 1000)
+                try await Task.sleep(for: .milliseconds(50))
+            } catch {
+                sendError = error
+            }
+        }
+
+        guard case .posixError(let error, _)? = sendError as? TailscaleError else {
+            XCTFail("want EPIPE, got \(String(describing: sendError))")
+            return
+        }
+        XCTAssertEqual(error.code, .EPIPE)
+
+        await inbound.close()
+        try await ts1.close()
+        try await ts2.close()
+    }
+
+    /// Tests that a send to a peer that stops reading throws ETIMEDOUT
+    /// within its timeout instead of blocking.
+    func testSendTimesOut() async throws {
+        let (ts1, ts2, inbound, conn) = try await connectedPair()
+        defer { Darwin.close(conn) }
+
+        // Much more than the socket and netstack buffers can hold.
+        let data = Data(count: 64 << 20)
+        let start = Date()
+        do {
+            try await inbound.send(data, timeout: 2000)
+            XCTFail("send to a peer that does not read succeeded")
+        } catch TailscaleError.posixError(let error, _) {
+            XCTAssertEqual(error.code, .ETIMEDOUT)
+        }
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertGreaterThanOrEqual(elapsed, 1.9)
+        XCTAssertLessThan(elapsed, 10)
+
+        await inbound.close()
+        try await ts1.close()
+        try await ts2.close()
+    }
+
+    /// Tests that send writes a message larger than the socket buffer.
+    func testSendLargeMessage() async throws {
+        let (ts1, ts2, inbound, conn) = try await connectedPair()
+        defer { Darwin.close(conn) }
+
+        let want = Data((0..<(1 << 20)).map { UInt8(truncatingIfNeeded: $0 &* 31) })
+        let reader = Task.detached { () -> Data in
+            var got = Data()
+            var buf = [UInt8](repeating: 0, count: 1 << 16)
+            while got.count < want.count {
+                var p = pollfd(fd: conn, events: Int16(POLLIN), revents: 0)
+                guard poll(&p, 1, 10_000) == 1 else { break }
+                let n = Darwin.read(conn, &buf, buf.count)
+                guard n > 0 else { break }
+                got.append(contentsOf: buf.prefix(n))
+            }
+            return got
+        }
+
+        try await inbound.send(want, timeout: 10_000)
+        let got = await reader.value
+        XCTAssertEqual(got.count, want.count)
+        XCTAssertTrue(got == want)
+
+        await inbound.close()
+        try await ts1.close()
+        try await ts2.close()
+    }
+
     /// Tests that LocalAPIClient.logout logs the node out.
     func testLogout() async throws {
         let logger = BlackholeLogger()

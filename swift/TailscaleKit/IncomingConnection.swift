@@ -51,20 +51,25 @@ public actor IncomingConnection {
         _state = .closed
     }
 
-    /// Sends data to the peer.
+    /// Sends all of the given data to the peer.
     ///
-    /// - Throws: TailscaleError if the connection is closed or the write is incomplete.
-    public func send(_ data: Data) throws {
+    /// The call blocks the actor until the peer accepts every byte or the
+    /// timeout passes.  If it throws after it sent part of the data, the
+    /// peer has received only a prefix of `data`; close the connection.
+    ///
+    /// - Parameters:
+    ///   - data: The bytes to send.
+    ///   - timeout: The longest time to wait, in milliseconds, for the whole
+    ///     send.  A negative value waits indefinitely.
+    /// - Throws: `TailscaleError.connectionClosed` if the connection is not
+    ///   connected, `TailscaleError.posixError` with `ETIMEDOUT` if the
+    ///   timeout passes, or with `EPIPE` if the peer has gone away.
+    public func send(_ data: Data, timeout: Int32 = kDefaultSendTimeout) throws {
         guard _state == .connected else {
             throw TailscaleError.connectionClosed
         }
 
-        let bytesWritten = data.withUnsafeBytes { bytes in
-            Darwin.write(conn, bytes.baseAddress, bytes.count)
-        }
-        if bytesWritten != data.count {
-            throw TailscaleError.shortWrite
-        }
+        try sendAll(data, to: conn, timeout: timeout)
     }
 
     /// Returns up to size bytes from the connection.  Blocks until
