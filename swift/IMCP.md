@@ -91,7 +91,13 @@ The build omits `logtail` and `netlog`,
 so the library cannot upload logs or network flow logs.
 It omits `acme`, so the node cannot get TLS certificates.
 
-For imcp-0.1.0, the signed framework is 20,204,833 bytes with this profile
+For 0.2.0-imcp.1, the signed framework is 17,066,149 bytes with this profile,
+and the zip is 6,502,502 bytes.
+Before the strip step and the removal of the Project directory
+and the ABI descriptor,
+the same build was 20,215,969 bytes, with a 6,899,635-byte zip.
+For imcp-0.1.0, which had no strip step,
+the framework was 20,204,833 bytes with this profile
 and 24,167,473 bytes with the same build and no feature tags.
 These sizes are the sums of the regular files in the framework bundle.
 

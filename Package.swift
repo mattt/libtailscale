@@ -16,8 +16,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "TailscaleKit",
-            url: "https://github.com/mattt/libtailscale/releases/download/imcp-0.1.0/TailscaleKit.xcframework.zip",
-            checksum: "cfc48d0c99f7094113d9890075f2e5309149f605376429cbcb1d533c5f0b890f"
+            url: "https://github.com/mattt/libtailscale/releases/download/0.2.0-imcp.1/TailscaleKit.xcframework.zip",
+            checksum: "8f9ad19e7bd81accaf622d168f16bccda442b8e50e3ef8ff896dfac48e6e867b"
         )
     ]
 )
