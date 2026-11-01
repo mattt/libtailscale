@@ -56,6 +56,10 @@ and adds these changes:
   can crash the process.
 - `swift/imcp-feature-tags.txt` lists the feature profile,
   and `make -C swift imcp` builds the release archive.
+- The macOS TailscaleKit target has a minimum of macOS 15.1, not 15.6,
+  to match iMCP.
+  Upstream raised the target to 15.6 without a stated reason,
+  and the Swift code builds for 15.1 without changes.
 
 ## Upstream tracking
 
@@ -91,8 +95,13 @@ The build omits `logtail` and `netlog`,
 so the library cannot upload logs or network flow logs.
 It omits `acme`, so the node cannot get TLS certificates.
 
-For 0.2.0-imcp.1, the signed framework is 17,066,149 bytes with this profile,
-and the zip is 6,502,502 bytes.
+For 0.2.0-imcp.2, which is universal,
+the signed framework is 35,659,593 bytes with this profile,
+and the zip is 13,784,500 bytes.
+In the binary, the arm64 slice is 16,972,832 bytes
+and the x86_64 slice is 18,481,760 bytes.
+For 0.2.0-imcp.1, which was arm64 only,
+the signed framework was 17,066,149 bytes, and the zip was 6,502,502 bytes.
 Before the strip step and the removal of the Project directory
 and the ABI descriptor,
 the same build was 20,215,969 bytes, with a 6,899,635-byte zip.
@@ -114,14 +123,15 @@ go run tailscale.com/cmd/featuretags --min \
 ## Use the package
 
 Add the package from `https://github.com/mattt/libtailscale`
-at the release tag, such as `0.2.0-imcp.1`.
+at the release tag, such as `0.2.0-imcp.2`.
 A consumer must meet these requirements:
 
 - Build with Swift 6.4 or later (Xcode 27.1).
   The framework contains only a `.swiftinterface`, not a binary module,
   and Swift 6.4 generated the interface.
-- Target macOS 15.6 or later, on arm64 only.
-  The framework has no x86_64 slice.
+- Target macOS 15.1 or later, on arm64 or x86_64.
+  The framework is universal.
+  A later release will drop the x86_64 slice.
 - Add the framework to the app target with "Embed & Sign".
   The release signs the framework ad hoc;
   embedding re-signs it with the app's identity,
@@ -139,12 +149,16 @@ Build on an arm64 Mac with Xcode and the Go version in `go.mod`:
 make -C swift imcp
 ```
 
-The target builds `libtailscale.a` with the feature tags,
-`-trimpath`, and `-ldflags="-s -w"`.
-It then builds `TailscaleKit.framework` in Release
-for macOS 15.6 on arm64 only.
+The target builds `libtailscale.a` for darwin/arm64 and darwin/amd64
+with the feature tags, `-trimpath`, and `-ldflags="-s -w"`,
+and combines the two archives with `lipo`.
+cmd/go passes `-arch x86_64` to clang for the amd64 build,
+so the system clang cross-compiles the cgo code.
+The target then builds `TailscaleKit.framework` in Release
+for macOS 15.1 on arm64 and x86_64.
 It wraps the framework in `TailscaleKit.xcframework`,
-strips debug and local symbols from the binary,
+which has one universal macOS library, `macos-arm64_x86_64`.
+It strips debug and local symbols from the binary,
 and removes `Modules/TailscaleKit.swiftmodule/Project/`
 and the module's `.abi.json` ABI descriptor,
 which record local source paths.
@@ -160,6 +174,8 @@ in the binary's build information.
 Build from a clean tree, so that the build records a commit
 and `vcs.modified=false`.
 To read them, run `go version -m` on the framework binary.
+For a universal binary, `go version -m` reads the first slice, x86_64;
+to read the arm64 slice, extract it with `lipo -thin arm64` first.
 
 ## Cut a release
 
@@ -172,7 +188,7 @@ which changes only `Package.swift` and this file.
 1. Commit all code changes, and check that `git status` shows a clean tree.
 2. Run `make -C swift imcp`.
 3. In `Package.swift`, set `checksum` to the printed checksum,
-   and change the release tag in `url` to the new tag, such as `0.2.0-imcp.1`.
+   and change the release tag in `url` to the new tag, such as `0.2.0-imcp.2`.
 4. Commit the change.
 5. Tag that commit with the same tag, and push the branch and the tag
    to `fork`.
@@ -180,7 +196,7 @@ which changes only `Package.swift` and this file.
    and attach `swift/build/imcp/TailscaleKit.xcframework.zip`:
 
    ```sh
-   gh release create 0.2.0-imcp.1 --repo mattt/libtailscale \
+   gh release create 0.2.0-imcp.2 --repo mattt/libtailscale \
      swift/build/imcp/TailscaleKit.xcframework.zip
    ```
 
