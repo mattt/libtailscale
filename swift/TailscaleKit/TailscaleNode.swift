@@ -208,6 +208,28 @@ public actor TailscaleNode {
         return try JSONDecoder().decode(WhoIsResponse.self, from: data)
     }
 
+    /// Logs the node out of the tailnet.
+    ///
+    /// The logout goes through tsnet's in-memory LocalAPI, so it does not
+    /// start the loopback server that `LocalAPIClient.logout()` uses.  It can
+    /// wait up to 30 seconds for the control server, so it runs off the actor.
+    ///
+    /// @See tailscale_logout in Tailscale.h
+    ///
+    /// - Throws: A TailscaleError on failure.
+    public func logout() async throws {
+        guard let tailscale else {
+            throw TailscaleError.badInterfaceHandle
+        }
+
+        try await Task.detached {
+            let res = tailscale_logout(tailscale)
+            guard res == 0 else {
+                throw TailscaleError.fromPosixErrCode(res, tailscale.getErrorMessage())
+            }
+        }.value
+    }
+
     /// Tears down the Tailscale server.
     ///
     /// @See tailscale_down in Tailscale.h

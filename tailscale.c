@@ -25,6 +25,7 @@ extern int TsnetListen(int sd, char* net, char* addr, int* listenerOut);
 extern int TsnetAccept(int ld, int* connOut);
 extern int TsnetLoopback(int sd, char* addrOut, size_t addrLen, char* proxyOut, char* localOut);
 extern int TsnetWhoIs(int sd, char* addr, char** jsonOut);
+extern int TsnetLogout(int sd);
 extern int TsnetStatusJSON(int sd, char** jsonOut);
 extern int TsnetEnableFunnelToLocalhostPlaintextHttp1(int sd, int localhostPort);
 
@@ -89,6 +90,10 @@ int tailscale_loopback(tailscale sd, char* addr_out, size_t addrlen, char* proxy
 
 int tailscale_whois(tailscale sd, const char* addr, char** json_out) {
 	return TsnetWhoIs(sd, (char*)addr, json_out);
+}
+
+int tailscale_logout(tailscale sd) {
+	return TsnetLogout(sd);
 }
 
 int tailscale_status_json(tailscale sd, char** json_out) {

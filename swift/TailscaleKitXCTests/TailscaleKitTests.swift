@@ -333,6 +333,30 @@ final class TailscaleKitTests: XCTestCase {
         try await ts1.close()
     }
 
+    /// Tests that TailscaleNode.logout logs the node out.
+    func testNodeLogout() async throws {
+        let ts1 = try TailscaleNode(config: mockConfig(), logger: BlackholeLogger())
+        try await ts1.up()
+
+        let before = try JSONDecoder().decode(IpnState.Status.self,
+                                              from: try await ts1.statusJSON())
+        XCTAssertEqual(before.BackendState, "Running")
+
+        try await ts1.logout()
+        let after = try JSONDecoder().decode(IpnState.Status.self,
+                                             from: try await ts1.statusJSON())
+        XCTAssertEqual(after.BackendState, "NeedsLogin")
+
+        try await ts1.close()
+
+        do {
+            try await ts1.logout()
+            XCTFail("logout on a closed node succeeded")
+        } catch TailscaleError.posixError(let error, _) {
+            XCTAssertEqual(error.code, .EBADF)
+        }
+    }
+
     /// The hostCount here is load bearing.  Each mock host must have a unique
     /// path and hostname.
     var hostCount = 0

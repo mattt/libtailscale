@@ -147,6 +147,11 @@ public actor LocalAPIClient {
     }
 
     /// Logs the local node out of the tailnet.
+    ///
+    /// Like the other LocalAPIClient methods, this request goes through the
+    /// node's loopback server.  The first request starts a SOCKS5 proxy and a
+    /// LocalAPI listener on 127.0.0.1, which run until the node closes.  To log
+    /// out without them, use `TailscaleNode.logout()`.
     public func logout() async throws {
         let error = await doSimpleAPIRequest(
             endpoint: .logout,

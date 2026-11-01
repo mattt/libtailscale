@@ -197,6 +197,16 @@ extern int tailscale_loopback(tailscale sd, char* addr_out, size_t addrlen, char
 // 	-1    - call tailscale_errmsg for details (*json_out is NULL)
 extern int tailscale_whois(tailscale sd, const char* addr, char** json_out);
 
+// tailscale_logout logs the node out of the tailnet through tsnet's
+// in-memory LocalAPI, without starting a loopback TCP server.
+// It waits up to 30 seconds for the control server.
+//
+// Returns:
+// 	0     - success
+// 	EBADF - sd is not a valid tailscale
+// 	-1    - call tailscale_errmsg for details
+extern int tailscale_logout(tailscale sd);
+
 // tailscale_status_json writes the backend status (the JSON encoding of
 // ipnstate.Status, the same struct LocalAPI's /localapi/v0/status returns)
 // to *json_out as a NUL-terminated, malloc'd string. The caller owns the

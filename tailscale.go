@@ -709,6 +709,23 @@ func TsnetWhoIs(sd C.int, addr *C.char, jsonOut **C.char) C.int {
 	return 0
 }
 
+//export TsnetLogout
+func TsnetLogout(sd C.int) C.int {
+	s := getServer(sd)
+	if s == nil {
+		return C.EBADF
+	}
+	// Like TsnetWhoIs, use tsnet's in-memory LocalAPI rather than
+	// starting Loopback()'s TCP server.
+	lc, err := s.s.LocalClient()
+	if err != nil {
+		return s.recErr(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return s.recErr(lc.Logout(ctx))
+}
+
 //export TsnetStatusJSON
 func TsnetStatusJSON(sd C.int, jsonOut **C.char) C.int {
 	if jsonOut == nil {
