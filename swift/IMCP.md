@@ -139,8 +139,9 @@ It then builds `TailscaleKit.framework` in Release
 for macOS 15.6 on arm64 only.
 It wraps the framework in `TailscaleKit.xcframework`,
 strips debug and local symbols from the binary,
-and removes `Modules/TailscaleKit.swiftmodule/Project/`,
-whose `.swiftsourceinfo` file records local source paths.
+and removes `Modules/TailscaleKit.swiftmodule/Project/`
+and the module's `.abi.json` ABI descriptor,
+which record local source paths.
 It then signs the framework ad hoc and zips the result.
 The output is `swift/build/imcp/TailscaleKit.xcframework.zip`.
 The target prints the zip's size and its SwiftPM checksum.

@@ -56,10 +56,13 @@ xcodebuild -create-xcframework \
 
 framework="$out_dir/TailscaleKit.xcframework/macos-arm64/TailscaleKit.framework"
 
-# Remove debug and local symbols from the binary, and the module's Project
-# directory, whose .swiftsourceinfo records local source paths.
+# Remove debug and local symbols from the binary. Remove the module's Project
+# directory and ABI descriptor, which record local source paths; the
+# .swiftinterface files are all that a client needs.
+module="$framework/Versions/A/Modules/TailscaleKit.swiftmodule"
 strip -S -x "$framework/Versions/A/TailscaleKit"
-rm -rf "$framework/Versions/A/Modules/TailscaleKit.swiftmodule/Project"
+rm -rf "$module/Project"
+rm -f "$module"/*.abi.json
 
 # Sign after -create-xcframework, which removes the binary .swiftmodule from
 # its copy, and after strip; either would break an earlier signature.
