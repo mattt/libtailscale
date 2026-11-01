@@ -86,6 +86,9 @@ extern int tailscale_set_logfd(tailscale sd, int fd);
 //
 // It is a pipe(2) on which you can use read(2), write(2), and close(2).
 // For extra control over the connection, see the tailscale_conn_* functions.
+//
+// On Darwin, the socket has SO_NOSIGPIPE set: after the peer closes the
+// connection, write(2) fails with EPIPE instead of raising SIGPIPE.
 typedef int tailscale_conn;
 
 // Returns the IP addresses of the the Tailscale server as

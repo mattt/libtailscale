@@ -424,6 +424,18 @@ func newConn(s *server, netConn net.Conn, connOut *C.int) error {
 	if err != nil {
 		return err
 	}
+	// C writes to fds[0] on its own threads. Once the peer goes away,
+	// the copy goroutines below close fds[1], and a later write to
+	// fds[0] must fail with EPIPE rather than kill the process. Set the
+	// option on fds[1] too, so that the copy goroutines' writes after C
+	// closes fds[0] raise no signal for the host's handlers to see.
+	for _, fd := range fds {
+		if err := setNoSigPipe(fd); err != nil {
+			syscall.Close(fds[0])
+			syscall.Close(fds[1])
+			return err
+		}
+	}
 	r := os.NewFile(uintptr(fds[1]), "socketpair-r")
 	c := &conn{s: s.s, c: netConn, r: r}
 	fdC := C.int(fds[0])

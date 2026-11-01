@@ -11,6 +11,7 @@ package tsnetctest
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/socket.h>
 #include "../tailscale.h"
 
 char* tmps1;
@@ -40,6 +41,26 @@ int check_cloexec(int fd) {
 		snprintf(err, errlen, "fd %d is not close-on-exec", fd);
 		return 1;
 	}
+	return 0;
+}
+
+// check_nosigpipe fails the test if fd does not have SO_NOSIGPIPE set on
+// Darwin. A write to a connection after its peer closed must fail with
+// EPIPE rather than raise SIGPIPE, which kills a process that writes on
+// a non-Go thread.
+int check_nosigpipe(int fd) {
+#ifdef __APPLE__
+	int on = 0;
+	socklen_t len = sizeof(on);
+	if (getsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, &len) != 0) {
+		snprintf(err, errlen, "getsockopt(%d, SO_NOSIGPIPE): errno %d (%s)", fd, errno, strerror(errno));
+		return 1;
+	}
+	if (!on) {
+		snprintf(err, errlen, "fd %d does not have SO_NOSIGPIPE set", fd);
+		return 1;
+	}
+#endif
 	return 0;
 }
 
@@ -98,7 +119,7 @@ int test_conn() {
 	if ((ret = tailscale_dial(s2, "tcp", "100.64.0.1:8081", &w)) != 0) {
 		return set_err(s2, '9');
 	}
-	if (check_cloexec(w)) {
+	if (check_cloexec(w) || check_nosigpipe(w)) {
 		return 1;
 	}
 
@@ -106,7 +127,7 @@ int test_conn() {
 	if ((ret = tailscale_accept(ln, &r)) != 0) {
 		return set_err(s2, 'a');
 	}
-	if (check_cloexec(r)) {
+	if (check_cloexec(r) || check_nosigpipe(r)) {
 		return 1;
 	}
 
