@@ -9,7 +9,7 @@ This branch is not an upstream pull request.
 
 ## Changes from upstream
 
-The branch starts at `d1dc45d` on `tailscale/libtailscale` `main`
+The branch starts at `ac7ed43` on `tailscale/libtailscale` `main`
 and adds these changes:
 
 - `OutgoingConnection.send(_:)` writes inside `withUnsafeBytes`.
@@ -21,13 +21,39 @@ and adds these changes:
   because the lookup can take up to 10 seconds.
   A mutex now guards each server's last error message,
   because lookups can run at the same time.
-- `IncomingConnection.send(_:)` sends data to the peer
+  The node still has one last error message,
+  so when calls fail at the same time,
+  an error's details can describe another call's failure.
+- `IncomingConnection.send(_:timeout:)` sends data to the peer
   of an accepted connection.
+- On Darwin, libtailscale sets `SO_NOSIGPIPE` on both ends
+  of each connection socketpair.
+  A write after the peer goes away fails with `EPIPE`.
+  Before this change, the write raised `SIGPIPE` on the caller's thread,
+  which terminated the process.
+- `IncomingConnection.send(_:timeout:)` and `OutgoingConnection.send(_:timeout:)`
+  write all of the data, retry after `EINTR`,
+  and throw `ETIMEDOUT` when the peer does not accept the data in time.
+  The timeout is in milliseconds, as for the receive methods,
+  and the default is 10 seconds.
+  Before this change, a send to a peer that stopped reading blocked forever.
+- `tailscale_logout` and `TailscaleNode.logout()` log the node out
+  through tsnet's in-memory LocalAPI.
+  The Swift method runs off the node's actor,
+  because the logout can take up to 30 seconds.
 - `LocalAPIClient.logout()` is public.
+  Like the other `LocalAPIClient` methods, it uses the loopback server,
+  which starts a SOCKS5 proxy and a LocalAPI listener on 127.0.0.1
+  for the rest of the node's life.
 - `IpnState.PeerStatus` decodes `UserID`.
 - `go.mod` replaces `tailscale.com` with a fork of v1.104.1
   that adds `client/local/cert_omit.go`.
   Without that file, tsnet does not compile with `ts_omit_acme`.
+- `make -C swift test` builds the tests with optimization,
+  and runs the tstestcontrol calls on one thread.
+  The test bundle links two Go runtimes,
+  and a thread that calls into one runtime and then the other
+  can crash the process.
 - `swift/imcp-feature-tags.txt` lists the feature profile,
   and `make -C swift imcp` builds the release archive.
 
@@ -79,6 +105,26 @@ go run tailscale.com/cmd/featuretags --min \
   | tr , '\n'
 ```
 
+## Use the package
+
+Add the package from `https://github.com/mattt/libtailscale`
+at the release tag, such as `0.2.0-imcp.1`.
+A consumer must meet these requirements:
+
+- Build with Swift 6.4 or later (Xcode 27.1).
+  The framework contains only a `.swiftinterface`, not a binary module,
+  and Swift 6.4 generated the interface.
+- Target macOS 15.6 or later, on arm64 only.
+  The framework has no x86_64 slice.
+- Add the framework to the app target with "Embed & Sign".
+  The release signs the framework ad hoc;
+  embedding re-signs it with the app's identity,
+  which notarization requires.
+
+With logtail omitted, tsnet does not upload logs.
+It still writes `tailscaled.log.conf`
+and empty log buffer (filch) files in the node's state directory.
+
 ## Rebuild
 
 Build on an arm64 Mac with Xcode and the Go version in `go.mod`:
@@ -92,28 +138,44 @@ The target builds `libtailscale.a` with the feature tags,
 It then builds `TailscaleKit.framework` in Release
 for macOS 15.6 on arm64 only.
 It wraps the framework in `TailscaleKit.xcframework`,
-signs the framework ad hoc, and zips the result.
+strips debug and local symbols from the binary,
+and removes `Modules/TailscaleKit.swiftmodule/Project/`,
+whose `.swiftsourceinfo` file records local source paths.
+It then signs the framework ad hoc and zips the result.
 The output is `swift/build/imcp/TailscaleKit.xcframework.zip`.
 The target prints the zip's size and its SwiftPM checksum.
 
 The zip contains file timestamps,
 so each build has a different checksum.
 
+Go records the commit and whether the tree had changes
+in the binary's build information.
+Build from a clean tree, so that the build records a commit
+and `vcs.modified=false`.
+To read them, run `go version -m` on the framework binary.
+
 ## Cut a release
 
-1. Run `make -C swift imcp`.
-2. In `Package.swift`, set `checksum` to the printed checksum,
-   and change the release tag in `url` to the new tag, such as `imcp-0.2.0`.
-3. Commit the change.
-4. Tag that commit with the same tag, and push the branch and the tag
+The checksum in `Package.swift` depends on the zip,
+so the build and the checksum are in different commits:
+the binary records the build commit,
+and the release tag goes on the next commit,
+which changes only `Package.swift` and this file.
+
+1. Commit all code changes, and check that `git status` shows a clean tree.
+2. Run `make -C swift imcp`.
+3. In `Package.swift`, set `checksum` to the printed checksum,
+   and change the release tag in `url` to the new tag, such as `0.2.0-imcp.1`.
+4. Commit the change.
+5. Tag that commit with the same tag, and push the branch and the tag
    to `fork`.
-5. Create a GitHub release for the tag on mattt/libtailscale,
+6. Create a GitHub release for the tag on mattt/libtailscale,
    and attach `swift/build/imcp/TailscaleKit.xcframework.zip`:
 
    ```sh
-   gh release create imcp-0.2.0 --repo mattt/libtailscale \
+   gh release create 0.2.0-imcp.1 --repo mattt/libtailscale \
      swift/build/imcp/TailscaleKit.xcframework.zip
    ```
 
-Upload the same zip that you built in step 1.
+Upload the same zip that you built in step 2.
 If you rebuild, update the checksum again.
