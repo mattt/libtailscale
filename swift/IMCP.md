@@ -97,7 +97,7 @@ It omits `acme`, so the node cannot get TLS certificates.
 
 For 0.2.0-imcp.2, which is universal,
 the signed framework is 35,659,593 bytes with this profile,
-and the zip is 13,784,500 bytes.
+and the zip is 13,784,485 bytes.
 In the binary, the arm64 slice is 16,972,832 bytes
 and the x86_64 slice is 18,481,760 bytes.
 For 0.2.0-imcp.1, which was arm64 only,
