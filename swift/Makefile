@@ -63,6 +63,9 @@ ios-fat: ios-sim ios ## Builds TailscaleKit.xcframework to swift/build/Build/Pro
 imcp:  ## Builds the iMCP TailscaleKit.xcframework zip to swift/build/imcp (see IMCP.md)
 	./script/build-imcp.sh
 
+# The tests build with optimization, as release builds do. Some bugs, such as
+# a pointer that escapes withUnsafeBytes (testSendShortMessage), only show up
+# in optimized code.
 .PHONY: test
 test: ## Run tests (macOS)
 	@echo 
@@ -75,11 +78,13 @@ test: ## Run tests (macOS)
 	 -configuration Debug \
 	 -quiet \
 	 -destination 'platform=macOS,arch=arm64' \
+	 SWIFT_OPTIMIZATION_LEVEL=-O \
 	 CODE_SIGNING_ALLOWED=NO
 	xcodebuild test-without-building  -scheme TailscaleKitXCTests \
 	 -derivedDataPath build \
 	 -configuration Debug \
 	 -destination 'platform=macOS,arch=arm64' \
+	 SWIFT_OPTIMIZATION_LEVEL=-O \
 	 CODE_SIGNING_ALLOWED=NO
 
 .PHONY: clean

@@ -9,9 +9,12 @@ final class TailscaleKitTests: XCTestCase {
 
     override func setUp() async throws {
         if controlURL == "" {
-            var buf = [CChar](repeating:0, count: 1024)
-            let res = buf.withUnsafeMutableBufferPointer { ptr in
-                return run_control(ptr.baseAddress!, 1024)
+            let (res, buf) = ControlThread.shared.run {
+                var buf = [CChar](repeating:0, count: 1024)
+                let res = buf.withUnsafeMutableBufferPointer { ptr in
+                    return run_control(ptr.baseAddress!, 1024)
+                }
+                return (res, buf)
             }
             let len = buf.firstIndex(where: { $0 == 0 }) ?? 0
             let str = buf[0..<len]
@@ -26,7 +29,7 @@ final class TailscaleKitTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        stop_control()
+        ControlThread.shared.run { stop_control() }
     }
 
     func testV4() async throws {
@@ -37,6 +40,10 @@ final class TailscaleKitTests: XCTestCase {
         try await runConnectionTests(for: .v6)
     }
 
+    /// Tests that a message short enough for Data's inline storage arrives
+    /// intact.  When the data pointer escaped withUnsafeBytes, the peer got
+    /// other bytes; that bug shows only in optimized builds, which
+    /// `make -C swift test` uses.
     func testSendShortMessage() async throws {
         try await runConnectionTests(for: .v4, message: Data("ping".utf8))
     }
@@ -301,6 +308,57 @@ final class TailscaleKitTests: XCTestCase {
     }
 }
 
+
+/// Runs the tstestcontrol calls on one thread that never calls TailscaleKit.
+///
+/// The test bundle links two Go runtimes: libtailscale's in TailscaleKit and
+/// tstestcontrol's.  On darwin/arm64, both keep the current goroutine in the
+/// same thread-local slot, and a C thread that calls into Go stays bound to
+/// that runtime's M after the call returns.  If a thread that called
+/// TailscaleKit later calls stop_control, tstestcontrol's runtime uses the
+/// other runtime's goroutine and crashes with errors such as "unknown caller
+/// pc" or "bad sweepgen in refill".
+final class ControlThread: @unchecked Sendable {
+    static let shared = ControlThread()
+
+    private let condition = NSCondition()
+    private var jobs: [() -> Void] = []
+
+    private init() {
+        let thread = Thread { [unowned self] in
+            while true {
+                condition.lock()
+                while jobs.isEmpty {
+                    condition.wait()
+                }
+                let job = jobs.removeFirst()
+                condition.unlock()
+                job()
+            }
+        }
+        thread.name = "tstestcontrol"
+        thread.start()
+    }
+
+    /// Runs `body` on the control thread and waits for its result.
+    func run<T>(_ body: @escaping () -> T) -> T {
+        let box = ResultBox<T>()
+        let done = DispatchSemaphore(value: 0)
+        condition.lock()
+        jobs.append {
+            box.value = body()
+            done.signal()
+        }
+        condition.signal()
+        condition.unlock()
+        done.wait()
+        return box.value!
+    }
+}
+
+private final class ResultBox<T>: @unchecked Sendable {
+    var value: T?
+}
 
 func getDocumentDirectoryPath() -> URL {
     let arrayPaths = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
