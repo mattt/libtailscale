@@ -54,9 +54,15 @@ xcodebuild -create-xcframework \
 	-framework "$out_dir/DerivedData/Build/Products/Release/TailscaleKit.framework" \
 	-output "$out_dir/TailscaleKit.xcframework"
 
-# Sign after -create-xcframework, which removes the binary .swiftmodule from
-# its copy and so would break an earlier signature.
 framework="$out_dir/TailscaleKit.xcframework/macos-arm64/TailscaleKit.framework"
+
+# Remove debug and local symbols from the binary, and the module's Project
+# directory, whose .swiftsourceinfo records local source paths.
+strip -S -x "$framework/Versions/A/TailscaleKit"
+rm -rf "$framework/Versions/A/Modules/TailscaleKit.swiftmodule/Project"
+
+# Sign after -create-xcframework, which removes the binary .swiftmodule from
+# its copy, and after strip; either would break an earlier signature.
 codesign --force --sign - --timestamp=none "$framework"
 codesign --verify --strict "$framework"
 
