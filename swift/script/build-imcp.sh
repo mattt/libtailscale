@@ -24,7 +24,10 @@ macos_target=15.1
 tags_file=${FEATURE_TAGS_FILE:-$swift_dir/imcp-feature-tags.txt}
 
 # One tag per line; lines starting with # are comments.
-tags=$(grep -v -e '^#' -e '^[[:space:]]*$' "$tags_file" | paste -s -d , - || true)
+if ! tags=$(awk '!/^#/ && !/^[[:space:]]*$/ { printf "%s%s", sep, $0; sep = "," }' < "$tags_file"); then
+	echo "build-imcp.sh: cannot read feature profile: $tags_file" >&2
+	exit 1
+fi
 
 rm -rf "$out_dir"
 mkdir -p "$out_dir"
