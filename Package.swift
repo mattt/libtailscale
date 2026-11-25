@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.4
 
 // TailscaleKit for iMCP: a prebuilt universal macOS framework with a trimmed
 // feature profile. See swift/IMCP.md.

@@ -63,11 +63,15 @@ ios-fat: ios-sim ios ## Builds TailscaleKit.xcframework to swift/build/Build/Pro
 imcp:  ## Builds the iMCP TailscaleKit.xcframework zip to swift/build/imcp (see IMCP.md)
 	./script/build-imcp.sh
 
+.PHONY: test-imcp-profile
+test-imcp-profile: ## Tests feature profile handling without building the framework
+	/bin/bash script/test-imcp-profile.sh
+
 # The tests build with optimization, as release builds do. Some bugs, such as
 # a pointer that escapes withUnsafeBytes (testSendShortMessage), only show up
 # in optimized code.
 .PHONY: test
-test: ## Run tests (macOS)
+test: test-imcp-profile ## Run tests (macOS)
 	@echo 
 	@echo "::: Running tests for TailscaleKit :::"
 	cd ../tstestcontrol && make all
